@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="measuring_intervals_array">
+        <item>every 12 hrs</item>
+        <item>every 8 hrs</item>
+        <item>every 6 hrs</item>
+        <item>every 3 hrs</item>
+        <item>every 1 hr</item>
+        <item>every 30 min</item>
+    </string-array>
+
+    <string-array name="videos_per_cycle_array">
+        <item>2</item>
+        <item>5</item>
+        <item>10</item>
+        <item>20</item>
+    </string-array>
+
+</resources>

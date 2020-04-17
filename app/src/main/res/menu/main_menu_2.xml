@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/open_settings"
+        android:title="@string/open_settings"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/export_db_2"
+        android:title="@string/export_db"
+        app:showAsAction="never"/>
+
+</menu>

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.support.constraint.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    tools:context=".MainActivity">
+
+    <!--
+    <ProgressBar
+        android:id="@+id/progressBar_load_lists"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:indeterminate="true"
+        android:visibility="invisible"
+        app:layout_constraintTop_toTopOf="parent" />
+        -->
+
+    <TextView
+        android:id="@+id/textView_app_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="17sp"
+        android:textColor="@android:color/black"
+        android:gravity="center"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:text="current status" />
+
+
+    <com.google.android.exoplayer2.ui.PlayerView
+        android:id="@+id/playerView"
+        android:focusable="true"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="10dp"
+        app:use_controller="false"
+        app:layout_constraintTop_toBottomOf="@+id/textView_app_status"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/textView_next_scheduled_measurement" />
+
+
+    <TextView
+        android:id="@+id/textView_next_scheduled_measurement"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="8dp"
+        android:gravity="center"
+        android:textColor="@android:color/black"
+        android:textSize="15sp"
+        app:layout_constraintBottom_toTopOf="@id/button_start_measurements"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        tools:text="Next scheduled: tomorrow" />
+
+    <Button
+        android:id="@+id/button_start_measurements"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:enabled="true"
+        android:gravity="center"
+        android:text="START MEASUREMENTS"
+        android:textSize="20sp"
+        android:textColor="@android:color/white"
+        android:background="@android:color/holo_red_light"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!--
+    <Button
+        android:id="@+id/button_stop_measurements"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:enabled="true"
+        android:gravity="center"
+        android:text="STOP MEASUREMENTS"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <WebView
+        android:id="@+id/webView_helper"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:visibility="visible"
+        android:layout_marginTop="16dp"
+        app:layout_constraintBottom_toTopOf="@+id/button_start_measurements"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/textView_app_status" />
+
+    <Button
+        android:id="@+id/button_youtube_sample"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginRight="5dp"
+        android:background="@color/colorPrimaryDark"
+        android:textColor="@android:color/white"
+        android:textSize="17sp"
+        android:text="Youtube Sample"
+        android:gravity="center"
+        app:layout_constraintHorizontal_bias="0.5"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/button_dtube_sample"/>
+
+    <Button
+        android:id="@+id/button_dtube_sample"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="5dp"
+        android:background="@color/colorPrimaryDark"
+        android:textColor="@android:color/white"
+        android:textSize="17sp"
+        android:text="Dtube Sample"
+        android:gravity="center"
+        app:layout_constraintHorizontal_bias="0.5"
+        app:layout_constraintStart_toEndOf="@+id/button_youtube_sample"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"/>
+        -->
+
+</android.support.constraint.ConstraintLayout>

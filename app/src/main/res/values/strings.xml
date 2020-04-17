@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">VoDMeasurementTool</string>
+    <string name="notification_title">VoDMeasurementTool</string>
+    <string name="notification_message">Playing media in background</string>
+    <string name="channel_name">media_player_channel</string>
+    <string name="channel_description">channel for notification of foreground service to play media</string>
+    <string name="export_db">export DB</string>
+    <string name="limit_2">limit: 2</string>
+    <string name="limit_10">limit: 10</string>
+    <string name="limit_50">limit: 50</string>
+    <string name="allow_wifi">allow wifi</string>
+    <string name="open_settings">Settings</string>
+    <string name="settings_measuring_interval">Measuring interval:</string>
+    <string name="settings_videos_per_cycle">Videos per cycle:</string>
+    <string name="settings_load_web_pages">Load web pages:</string>
+    <string name="settings_save_settings">SAVE SETTINGS</string>
+    <string name="settings_save_settings_disclaimer">Warning: changing settings during an active measurement cycle may cause unpredictable behaviors.</string>
+    <string name="app_name_abbreviated">VoDMe</string>
+    <string name="settings_label">Settings</string>
+    <string name="settings_mute_videos">Mute videos:</string>
+    <string name="settings_enable_scheduling">Scheduling enabled:</string>
+</resources>
