@@ -13,9 +13,23 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
     private var srcUrlHtml: String? = null
 
 
-    private val TRENDING = 0
-    private val SRC_URL = 1
+    private val TRENDING = 0    // flag for `CustomCountDownTimer`, to mark that the timer is to limit the `get trending
+                                // videos` action
+    private val SRC_URL = 1     // flag for `CustomCountDownTimer`, to mark that the timer is to limit the `get direct
+                                // video url` action
 
+    /**
+     * Timer to limit actions executed for DTube platform, i.e. fetching list of trending videos and fetching
+     * corresponding direct urls. As DTube does not provide any API (at time of this app's implementation), we try to
+     * acquire and parse needed data from the DTube web pages' source htmls. As we only intercept the web pages'
+     * content, there is no such thing as server response, so we are unable to tell when the actions have succeeded,
+     * in order to tell them to finish. This Timer class serves as a stopwatch, finishing the actions when the time
+     * limit has been reached. We set the limit long enough so that in most cases the actions would have succeeded
+     * until then.
+     *
+     * @param   period  the time limit to allow a certain action the run, in ms
+     * @param   purpose either TRENDING or SRC_URL
+     */
     private inner class CustomCountDownTimer(period: Long, private val purpose: Int) : CountDownTimer(period, 1000) {
 
         override fun onFinish() {
@@ -55,6 +69,15 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
         CustomCountDownTimer(period, purpose).start()
     }
 
+    /**
+     * Fetch videos (their web urls) on DTube's trending list. As DTube does not have any API (at time of this app's
+     * implementation), we try to acquire the urls by loading DTube's trending web page
+     * (https://d.tube/#!/trendingvideos) and parsing the videos' web urls from the page's source html.
+     * Take in consideration that DTube's source code - as the platform was still under development at the time of this
+     * app's implementation - may have been changed since then, so it is recommended to review the behavior of DTube's
+     * source html in case the following app's logic appears to not be working, or check if DTube has come up with
+     * some sort of API respectively.
+     */
     override fun getTrendingList(completion: () -> Unit) {
 
         this.completion = completion
@@ -68,9 +91,13 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
                     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                         val host = request?.url?.host
 
+                        // intercept specific redirect calls after which the web urls of trending videos should have
+                        // been included in the html source page
                         if (host != null && (host.contains("ipfs.io") || host.contains("snap1.d.tube")) && !interfaceCalled) {
                             L.d { "shouldInterceptRequest(): call to gateway for images" }
                             interfaceCalled = true
+                            // call `JSTrendingInterface.getTrendingList()` to parse the web urls of trending videos
+                            // from the html source page
                             trendingListHtml = "javascript:JSTrendingInterface.getTrendingList" + "('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>');"
                         }
 
@@ -81,6 +108,7 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
         playerService.updateNotification("Fetching dTube trending list...", true)
 
         startTimer(60000, TRENDING)
+        // open the DTube's trending list web page after intercepting interface and client has been set
         webView?.loadUrl("https://d.tube/#!/trendingvideos")
     }
 
@@ -106,8 +134,6 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
 
         playerService.runOnServiceThread(Runnable {
             val webView = playerService.provideHiddenWebView()
-            //time to cleanup
-            //Thread.sleep(2000)
             webView?.addJavascriptInterface(JSInterface(), DTubeJSInterface.JSInterface.iName)
             webView?.webViewClient = object : WebViewClient() {
 
@@ -122,26 +148,26 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
                                 currentFallbackSrcUrl_2 = request.url.toString()
                             }
 
-//                            val isGatewayRequest = host.contains("ipfs.io") || host.contains("video.dtube.top")
-//                            if (isGatewayRequest) {
-//                                currentFallbackSrcUrl = request.url.toString()
-//                            }
-//                            val isHEADRequest = host.contains("video.dtube.top") && request.method.contains("HEAD")
-//
-//                            L.d { "isHeadRequest = $isHEADRequest, isGatewayRequest = $isGatewayRequest, interfaceCalled = $interfaceCalled" }
-//
-//                            if (!isHEADRequest && isGatewayRequest && !interfaceCalled) {
-//                                interfaceCalled = true
-//                                srcUrlHtml = "javascript:JSInterface.analyseEmbedPlayerHtml('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>');"
-//
-//                                //return WebResourceResponse(null, null, null)
-//                            }
-
+/*
+ * Following was the original logic, which stopped working in middle of implementation. DTube might have changed their
+ * pages' structure at that point. New observations revealed that the video's direct url can be intercepted as redirect
+ * urls to `video.dtube.top` or `ipfs.io`, hence the solution above.
+ *
+                            val isGatewayRequest = host.contains("ipfs.io") || host.contains("video.dtube.top")
+                            val isHEADRequest = host.contains("video.dtube.top") && request.method.contains("HEAD")
+                            if (!isHEADRequest && isGatewayRequest && !interfaceCalled) {
+                                interfaceCalled = true
+                                srcUrlHtml = "javascript:JSInterface.analyseEmbedPlayerHtml('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>');"
+                            }
+*/
                             return super.shouldInterceptRequest(view, request)
                         }
                     }
 
+            // Construct link to the video's direct url that corresponds to the given `webUrl`. This was the observed
+            // logic at the time of this app's implementation.
             val embUrl = "https://emb.d.tube/#!/${webUrl.substring(20)}"
+            // open the DTube video's web page after intercepting interface and client has been set
             webView?.let {
                 L.d { "WebView Loading $embUrl" }
                 it.loadUrl(embUrl)
@@ -150,7 +176,20 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
         startTimer(10000, SRC_URL)
     }
 
+    /**
+     * JavaScript interface to intercept web urls of DTube's trending videos from DTube's `trending` web page.
+     */
     private inner class JSTrendingInterface {
+
+        /**
+         * Parse the web urls of trending videos from the html source of DTube's `trending` web page.
+         * The parsing logic is based on the structure of the DTube's `trending` web page's html source observed at the
+         * time of this app's implementation. Take in consideration that DTube was still under development at that time
+         * and the page structure may have been changed since then, so it is recommended to review the behavior of
+         * DTube's source html in case the following app's logic appears to not be working.
+         *
+         * @param   html    the String representation of the `trending` web page's html source
+         */
         @JavascriptInterface
         @SuppressWarnings("unused")
         fun getTrendingList(html: String) {
@@ -163,17 +202,32 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
                 L.d { "dtVideoUrl = $videoUrl" }
                 tempWebUrlsList.add(videoUrl)
             }
+
+            // store the extracted videos' web urls in `webUrlsList`
             tempWebUrlsList.shuffled().subList(0, maxVideoCount).forEach {dtWebUrl ->
                 webUrlsList.add(dtWebUrl)
             }
 
-            //after getting video urls from trending, start getting src urls of the videos
+            // start fetching direct video urls that correspond to the extracted web urls
             playerService.updateNotification("Fetching dTube source urls...", true)
             getVideoUrlByIndex(0, completion)
         }
     }
 
+    /**
+     * JavaScript interface to intercept direct url corresponding to DTube's video's web url.
+     */
     private inner class JSInterface {
+
+        /**
+         * Parse the corresponding direct video url from the DTube video's web page's html source.
+         * The parsing logic is based on the structure of the DTube's video web page's html source observed at the
+         * time of this app's implementation. Take in consideration that DTube was still under development at that time
+         * and the page structure may have been changed since then, so it is recommended to review the behavior of
+         * DTube's source html in case the following app's logic appears to not be working.
+         *
+         * @param   html    the String representation of the DTube video's web page's html source
+         */
         @JavascriptInterface
         @SuppressWarnings("unused")
         fun analyseEmbedPlayerHtml(html: String) {
@@ -193,6 +247,14 @@ class DTubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerSer
     }
 }
 
+/**
+ * Enum to match the defined JS interfaces, which purpose is to hold the identifying name of the corresponding interface
+ *
+ * @param   iName   identifying name of the corresponding JS interface
+ */
 enum class DTubeJSInterface(val iName: String) {
-    JSInterface("JSInterface"), JSTrendingInterface("JSTrendingInterface")
+    /** Interface to intercept direct url corresponding to DTube's video's web url */
+    JSInterface("JSInterface"),
+    /** Interface to intercept web urls of DTube's trending videos */
+    JSTrendingInterface("JSTrendingInterface")
 }

@@ -32,29 +32,78 @@ import de.tum.`in`.cm.vodmeasurementtool.model.*
 import de.tum.`in`.cm.vodmeasurementtool.util.*
 import kotlinx.android.synthetic.main.activity_main.*
 
+/**
+ * Foreground service that manages the video playbacks and measurements. This service lives only for the duration of one
+ * single measurement session; for every new measurement session, a new instance of this service is created.
+ */
 class MediaPlayerService : Service() {
 
+    /**
+     * Reference to the video player
+     */
     var exoPlayer: SimpleExoPlayer? = null
+
+    /**
+     * User preferences, editable by user in the app's settings
+     */
     lateinit var prefsUtil: PreferencesUtil
+
+    /**
+     * WakeLock in order to start and run this service even if the app is in locked/sleep mode.
+     */
     private var wakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * WifiLock to turn on wifi if it was turn off by the device in locked/sleep mode and battery saver mode.
+     */
     private var wifiLock: WifiManager.WifiLock? = null
+
+    /**
+     * Listener of device lock/unlock action, in order to acquire or release wake/wifiLocks.
+     */
     private val receiver = ScreenOnOffReceiver()
 
+    /**
+     * In-memory dTube-video-measurement ids needed in order to match a video measurement result to its traceRoute
+     * result.
+     */
     private val dtMeasurementIds = mutableListOf<Long>()
+
+    /**
+     * In-memory youtube-video-measurement ids needed in order to match a video measurement result to its traceRoute
+     * result.
+     */
     private val ytMeasurementIds = mutableListOf<Long>()
 
+    /**
+     * Util to fetch youtube video urls to be measured
+     */
     private lateinit var ytUtil: YoutubeUtil
+
+    /**
+     * Util to fetch dTube video urls to be measured
+     */
     private lateinit var dtUtil: DTubeUtil
 
     var isServiceRunning = false
     private var isMeasurementsRunning = false
+
+    /**
+     * Flag to mark the platform from which the currently played/measured video is from.
+     */
     private var currentPlatform = Platform.UNKNOWN
 
+    /**
+     * Number of videos to play/measure during the current measurement session.
+     */
     private val videosToPlay: Int
         get() {
             return ytUtil.trendingList.size + dtUtil.trendingList.size
         }
 
+    /**
+     * Return the current network type.
+     */
     private val currentNetworkType: NetworkType
         get() {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager?
@@ -75,23 +124,59 @@ class MediaPlayerService : Service() {
             return NetworkType.UNKNOWN
         }
 
+    /**
+     * Number of videos that have been played and measured during current measurement session.
+     */
     private var videosPlayed: Int = 0
+
+    /**
+     * Number of videos for which treaceroute has been performed during current measurement session.
+     */
     private var videosTraced: Int = 0
+
     private var collectedMeasurements: Int = 0
 
+    /**
+     * Number of currently running write-to-database background tasks. If this flag is greater than 0, this foreground
+     * service would wait an extra time (1 minute) for tasks to finish before the service finishes itself.
+     */
     private var tasksRunning = 0
 
+    /**
+     * A foreground service needs to show a notification that is visible during the entire lifecycle of the service.
+     * The notification itself needs a unique id which the device uses to identify it.
+     */
     private val ONGOING_NOTIFICATION_ID = 2309
+
+    /**
+     * A notification needs to belong to some channel, in our case we will create our own notification channel, which
+     * needs a unique channel id.
+     */
     private val CHANNEL_ID = "23091991"
 
+    /**
+     * The channel through which the service's notification will be managed.
+     */
     private lateinit var channel: NotificationChannel
 
+    /**
+     * Reference to the local sqlite database where the collected measurement data will be stored.
+     */
     private var appDb: AppDatabase? = null
 
+    /**
+     * A helper webView used to load the videos' web url pages.
+     */
     var hiddenWebView: WebView? = null
 
+    /**
+     * A binder interface to bind this service to the app's main screen (MainActivity), if the app is on foreground.
+     * Through this binding, the main screen can then access information about the measurement session's current
+     * state, e.g. its progress, or display the currently played video.
+     */
     private val binder = MediaPlayerServiceBinder()
     var mainActivity: MainActivity? = null
+
     private var serviceMode = ServiceMode.IDLE
 
     private val isDeviceLocked: Boolean
@@ -100,11 +185,19 @@ class MediaPlayerService : Service() {
             return km?.isDeviceLocked != false
         }
 
+    /**
+     * A binder interface to bind this service to the app's main screen (MainActivity), if the app is on foreground.
+     * Through this binding, the main screen can then access information about the measurement session's current
+     * state, e.g. its progress, or display the currently played video.
+     */
     inner class MediaPlayerServiceBinder : Binder() {
         val service: MediaPlayerService
             get() = this@MediaPlayerService
     }
 
+    /**
+     * Modes denoting the service's current activity.
+     */
     private enum class ServiceMode {
         TRACING, PLAYING, IDLE
     }
@@ -165,9 +258,10 @@ class MediaPlayerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-
-        //at least 1 minute cooldown between measurement cycles
         prefsUtil = PreferencesUtil(this)
+        // We store the timestamp of the end of the last measurement session, and start a new session only if 1 minute
+        // has already passed. This logic is to avoid leaks in case some of the background tasks of the previous session
+        // has not finished in time.
         if (prefsUtil.lastServiceFinishTime != -1L && System.currentTimeMillis() - prefsUtil.lastServiceFinishTime <= 60000L) {
             stopSelf()
             return START_NOT_STICKY
@@ -197,6 +291,7 @@ class MediaPlayerService : Service() {
         val name = getString(R.string.channel_name)
         val descriptionText = getString(R.string.channel_description)
 
+        // For API 26 or newer, we need to create a channel that will manage the service's notification
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val importance = NotificationManager.IMPORTANCE_HIGH
             channel = NotificationChannel(CHANNEL_ID, name, importance)
@@ -205,6 +300,8 @@ class MediaPlayerService : Service() {
             notificationManager?.createNotificationChannel(channel)
         }
 
+        // Fire a notification that denotes that this service is running. Also, this notification is further used to
+        // notify user about the measurement session's current progress.
         val notification = getNotificationBuilder()
                 .setContentTitle("Starting Media Player Service")
                 .setProgress(0, 0, true)
@@ -213,21 +310,14 @@ class MediaPlayerService : Service() {
 
         isServiceRunning = true
         runOnServiceThread(Runnable {
+            // Update main screen's UI if the app is in foreground
             mainActivity?.let {
                 it.textView_app_status.text = "Media Player Service running"
-                //it.progressBar_load_lists.visibility = View.INVISIBLE
             }
-            //startMeasurementsMock()
             startMeasurements()
         }, 10000)
 
         return Service.START_STICKY
-    }
-
-    private fun startMeasurementsMock() {
-        runOnServiceThread(Runnable {
-            stopSelf()
-        }, 10000)
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -251,6 +341,16 @@ class MediaPlayerService : Service() {
         isServiceRunning = false
     }
 
+    /**
+     * Set up an invisible webView in order to load the videos' web url pages, if this option was enabled in settings.
+     * The webView could not be part of the app's native UI, because if the app itself is in background (not to be
+     * mistaken with this service which is always treated as on foreground once started), there would be no way to
+     * access such webView. Therefore a workaround was applied, which forces a creation of an invisible webView on top
+     * of all current screens, not requiring the app to be on foreground. Note that this workaround needs the
+     * `SYSTEM_ALERT_WINDOW` permission, and has been marked dangerous, as it let our app draws something (the webView)
+     * on top of all currently running apps. The permission has been therefore recently deprecated, consider a rework
+     * using Android Bubbles.
+     */
     private fun setupHiddenWebView(): WebView {
         val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager?
 
@@ -286,7 +386,6 @@ class MediaPlayerService : Service() {
         }
 
         clearHiddenWebViewContent()
-        //hiddenWebView?.settings?.cacheMode = WebSettings.LOAD_NO_CACHE
         hiddenWebView?.settings?.javaScriptEnabled = true
         hiddenWebView?.settings?.javaScriptCanOpenWindowsAutomatically = true
         hiddenWebView?.settings?.domStorageEnabled = true
@@ -317,19 +416,23 @@ class MediaPlayerService : Service() {
             appDb = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "vod_measurements_database").build()
         }
 
-        //need to call this to open connection with db
+        // need to call this to open connection with db
         appDb?.openHelper?.writableDatabase
 
         appDb?.let {
+            // The following does not affect the measurement process anyhow, it is just for debugging.
+            // Before the start of the measurement session, log all currently stored measurements.
+            // Remove or comment out if you don't need this.
             DBLogger().execute()
         }
 
         if (!isMeasurementsRunning) {
             isMeasurementsRunning = true
 
+            // fetch dTube's trending videos
             dtUtil.getTrendingList {
+                // and then, fetch youTube's trending videos
                 ytUtil.getTrendingList {
-
                     dtUtil.trendingList.forEach {
                         L.d { "dtData = $it" }
                     }
@@ -339,18 +442,27 @@ class MediaPlayerService : Service() {
                     }
 
                     currentPlatform = Platform.YOUTUBE
+
+                    // and then, start playing (and measuring) all the fetched youtube videos
                     playListByIndex(ytUtil.trendingList, 0) {
+
                         currentPlatform = Platform.DTUBE
+
+                        // and then, start playing (and measuring) all the fetched dTube videos
                         playListByIndex(dtUtil.trendingList, 0) {
                             runOnServiceThread(Runnable {
                                 resetPlayer()
                             })
                             runOnServiceThread(Runnable {
                                 currentPlatform = Platform.YOUTUBE
+
+                                // and then, perform traceRoute for all the fetched youtube videos
                                 traceRouteListByIndex(ytUtil.trendingList, 0) {
                                     currentPlatform = Platform.DTUBE
+                                    // and then, perform traceRoute for all the fetched dTube videos
                                     traceRouteListByIndex(dtUtil.trendingList, 0) {
                                         currentPlatform = Platform.UNKNOWN
+                                        // and then, stop this foreground service
                                         delayedStopSelf(3000)
                                     }
                                 }
@@ -361,8 +473,15 @@ class MediaPlayerService : Service() {
                 }
             }
         }
+        // Note the deep nesting level, yet there are only 2 platforms. Consider rewriting the chaining logic using
+        // rxJava, which is highly chainable. I did not master the technology at the time of this app's implementation.
     }
 
+    /**
+     * Stop this foreground service, with some delay in order for all background tasks to finish.
+     *
+     * @param   delay   The desired delay, in ms. Recommended is at least 3000 ms.
+     */
     private fun delayedStopSelf(delay: Long) {
         updateNotification("Finishing tasks...", true)
         runOnServiceThread(Runnable {
@@ -380,6 +499,7 @@ class MediaPlayerService : Service() {
             Thread.sleep(60000)
         }
 
+        // export the local database, along with newly collected measurements, to server.
         exportDb {
             appDb?.let {
                 if (it.isOpen) {
@@ -393,16 +513,31 @@ class MediaPlayerService : Service() {
         releaseWifiLock()
     }
 
+    /**
+     * Write a single measurement measured from one video to the local database.
+     *
+     * @param   measurement     the Measurement instance to write
+     */
     private fun writeMeasurementToDb(measurement: Measurement) {
         tasksRunning++
         WriteMeasurementToDbTask(measurement).execute()
     }
 
+    /**
+     * Write a single traceRoute result measured from one video to the local database.
+     *
+     * @param   traceRouteResult     the TraceRouteResult instance to write
+     */
     private fun writeTraceRouteResultToDb(traceRouteResult: TraceRouteResult) {
         tasksRunning++
         WriteTraceRouteResultToDbTask(traceRouteResult).execute()
     }
 
+    /**
+     * Export the local database and send its copy to remote server.
+     *
+     * @param   completion      Additional action to be executed when the export task finishes
+     */
     private fun exportDb(completion: () -> Unit) {
         DbExportTask(this, completion).execute()
     }
@@ -416,6 +551,10 @@ class MediaPlayerService : Service() {
         }
     }
 
+    /**
+     * Helper function to create a builder to build the notification that denotes that this service is running.
+     * The notification is further used to notify user about the measurement session's current progress.
+     */
     private fun getNotificationBuilder(): Notification.Builder {
         val activityIntent = Intent(this, MainActivity::class.java)
         val activityPendingIntent = PendingIntent.getActivity(this, 0, activityIntent, 0)
@@ -427,14 +566,17 @@ class MediaPlayerService : Service() {
         }
         return notificationBuilder
                 .setSmallIcon(R.drawable.ic_play_button)
-                //.setContentIntent(pendingIntent)
                 .setContentIntent(activityPendingIntent)
     }
 
+    /**
+     * Helper function to update the running notification.
+     *
+     * @param   contentText             The text to be shown on the notification
+     * @param   indeterminateProgress   If set to true, an indeterminate progressBar is shown on the notification.
+     */
     fun updateNotification(contentText: String, indeterminateProgress: Boolean = false) {
-        //L.d { "updateNotification(): $message" }
         val notification = getNotificationBuilder()
-                //.setContentText(contentText)
                 .setContentTitle(contentText)
                 .setStyle(Notification.BigTextStyle().bigText(contentText))
                 .setProgress(0, 0, indeterminateProgress)
@@ -443,6 +585,9 @@ class MediaPlayerService : Service() {
         notificationManager?.notify(ONGOING_NOTIFICATION_ID, notification)
     }
 
+    /**
+     * Helper function to update the running notification.
+     */
     private fun updateProgressNotification() {
         val contentText = when (serviceMode) {
             MediaPlayerService.ServiceMode.TRACING ->
@@ -467,7 +612,6 @@ class MediaPlayerService : Service() {
         }
 
         val notification = getNotificationBuilder()
-                //.setContentText(contentText)
                 .setContentTitle(contentText)
                 .setStyle(Notification.BigTextStyle().bigText(contentText))
                 .setProgress(videosToPlay, progress, false)
@@ -476,6 +620,9 @@ class MediaPlayerService : Service() {
         notificationManager?.notify(ONGOING_NOTIFICATION_ID, notification)
     }
 
+    /**
+     * Helper function to update the running notification at the end of the entire measurement session.
+     */
     private fun fireFinishedNotification() {
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager?
         val channel_id = "19910923"
@@ -494,7 +641,6 @@ class MediaPlayerService : Service() {
         val notification = notificationBuilder
                 .setContentTitle("Measurements finished.")
                 .setSmallIcon(R.drawable.ic_play_button)
-                //.setContentText("Measurements have finished. Collected $collectedMeasurements measurements.")
                 .setStyle(Notification.BigTextStyle().bigText(
                         "Measurements have finished. Collected $collectedMeasurements measurements."
                 ))
@@ -522,9 +668,18 @@ class MediaPlayerService : Service() {
         }
     }
 
+    /**
+     * Helper function to play a list of videos one by one (in current implementation, either the fetched dTube or
+     * youtube trending videos), and collect corresponding measurements.
+     *
+     * @param   list        The list of videos to play and start a measurement for
+     * @param   index       Current index of the video in the list to measure. Pass in '0' to play the entire video list
+     * @param   completion  Additional action to be executed after the entire list has been played and measured
+     */
     private fun playListByIndex(list: List<BasicVideoData>, index: Int, completion: () -> Unit) {
         if (index >= list.size) {
             serviceMode = ServiceMode.IDLE
+            // execute the additional action once all videos have been played
             completion.invoke()
             return
         }
@@ -534,20 +689,35 @@ class MediaPlayerService : Service() {
         updateProgressNotification()
 
         val videoContent = VideoContent(list[index])
+
+        // start a single measurement for the video from the current list's index
         startSingleMeasurement(videoContent) {
+            // after this single measurement has finished, play and measure the video at next index
             playListByIndex(list, index + 1, completion)
         }
     }
 
+    /**
+     * Start a single measurement for the video described by the `videoContent` parameter. The single measurement
+     * includes a tcpPing to the video's source url, in order to acquire the tcp connection time, as well as playing
+     * the video and collecting its playback data.
+     *
+     * @param   videoContent    Parameter describing the video to play, see the `VideoContent` class
+     * @param   completion      Additional action to be executed once this single measurement has finished
+     */
     private fun startSingleMeasurement(videoContent: VideoContent, completion: () -> Unit) {
-        tcpPing(videoContent.basicVideoData.srcUrl) { tcpConnectionTimeMs ->
+        // Run tcpPing to the video's source url first, to get the tcp connection time
+        tcpPing(videoContent.basicVideoData.srcUrl) { tcpConnectionTimeMs -> // the collected tcp connection time
             val tempMeasurement = TempMeasurement(videoContent.basicVideoData, videoContent.platform, currentNetworkType)
             tempMeasurement.tcpConnectionTimeMs = tcpConnectionTimeMs
 
+            // Then, start the video's playback and collect playback data
             this@MediaPlayerService.runOnServiceThread(Runnable {
                 resetPlayer()
                 preparePlayer(tempMeasurement) { resultMeasurement ->
                     L.d { "resultMeasurement: $resultMeasurement" }
+                    // At the end of the playback, store the measurement's id to match them later with corresponding
+                    // traceRoute results.
                     when (currentPlatform) {
                         Platform.YOUTUBE -> {
                             resultMeasurement?.let {
@@ -584,16 +754,30 @@ class MediaPlayerService : Service() {
         return ExtractorMediaSource.Factory(dataSourceFactory).createMediaSource(uri)
     }
 
+    /**
+     * Setup the video player to play the video described in the `tempMeasurement` parameter.
+     *
+     * @param   tempMeasurement     A temporary measurement instance where the video's basic data (urls) are stored.
+     *                              It will also be used to store data that will be collected during the playback.
+     * @param   onPlayerEnded       Additional action to be executed once the playback finishes.
+     */
     private fun preparePlayer(tempMeasurement: TempMeasurement, onPlayerEnded: (measurement: Measurement?) -> Unit) {
         exoPlayer?.let {
             val mediaSource = createDefaultMediaSource(tempMeasurement.sourceUrl)
-            //val clippedMediaSource = ClippingMediaSource(mediaSource, 0, 60000000)
             it.playWhenReady = true
             it.addAnalyticsListener(VideoAnalyticsListener(it, this, tempMeasurement, onPlayerEnded))
             it.prepare(mediaSource)
         }
     }
 
+    /**
+     * Function to acquire the tcp connection time to a video's source url. For this, the TcpPing library is used,
+     * see https://github.com/qiniu/android-netdiag for detailed implementation
+     *
+     * @param   url         The video's source url for which to acquire the tcp connection time
+     * @param   completion  Additional action to be executed once the tcp connection time is acquired. The collected
+     *                      tcp connection time is passed through this action for further processing
+     */
     private fun tcpPing(url: String, completion: (tcpConnectionTime: Int) -> Unit) {
         val dest = url.getUrlHost()
         TcpPing.start(dest, 80, 3,
@@ -608,9 +792,19 @@ class MediaPlayerService : Service() {
                 })
     }
 
+    /**
+     * Helper function to run traceRoute for list of videos one by one (in current implementation, either the fetched
+     * dTube or youtube trending videos).
+     *
+     * @param   list        The list of videos to run traceRoute for
+     * @param   index       Current index of the video in the list to run traceRoute for. Pass in '0' to run traceRoute
+     *                      for the entire video list (one by one)
+     * @param   completion  Additional action to be executed after traceRoute has been run for the entire video list
+     */
     private fun traceRouteListByIndex(list: List<BasicVideoData>, index: Int, completion: () -> Unit) {
         if (index >= list.size) {
             serviceMode = ServiceMode.IDLE
+            // execute the additional action once traceRoute has been run for all videos from the list
             completion.invoke()
             return
         }
@@ -620,7 +814,10 @@ class MediaPlayerService : Service() {
         updateProgressNotification()
 
         val videoContent = VideoContent(list[index])
-        traceRoute(videoContent.basicVideoData) { traceRouteResult ->
+
+        // run a single traceRoute for the video from the current list's index
+        traceRoute(videoContent.basicVideoData) { traceRouteResult -> // the collected traceRoute data
+            // match this traceRoute result with the already collected measurement data of the corresponding video
             when (currentPlatform) {
                 Platform.YOUTUBE ->
                     traceRouteResult?.measurementId = ytMeasurementIds[index]
@@ -636,6 +833,7 @@ class MediaPlayerService : Service() {
                 writeTraceRouteResultToDb(TraceRouteResult(it))
             }
 
+            // after this single traceRoute has finished, run traceRoute for the video at next index
             traceRouteListByIndex(list, index + 1, completion)
         }
     }
@@ -643,6 +841,10 @@ class MediaPlayerService : Service() {
     private var currentTracerouteResult: TempTraceRouteResult? = null
     private var currentTracedUrl: String? = null
 
+    /**
+     * Function to run traceRoute for the video's source url. For this, the https://github.com/qiniu/android-netdiag
+     * library was used, visit for detailed implementation.
+     */
     private fun traceRoute(basicVideoData: BasicVideoData, completion: (traceRouteResult: TempTraceRouteResult?) -> Unit) {
         L.d { "Tracing ${basicVideoData.srcUrl} ..." }
         var hopCount = 0
