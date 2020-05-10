@@ -20,7 +20,7 @@ class YoutubeUtil(playerService: MediaPlayerService) : VideoPlatformUtil(playerS
             .addConverterFactory(GsonConverterFactory.create())
             .build()
     private val ytService: YoutubeService
-    private val keySet = listOf(83, 35, 22, 18, 6, 5)
+    private val keySet = listOf(35, 22, 18, 6, 5)
 
     init {
         ytService = retrofit.create(YoutubeService::class.java)
