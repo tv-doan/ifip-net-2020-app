@@ -5,10 +5,10 @@ Work in progress, will be extended in the future.
 
 The app was developed and used as part of a measurement study, published at IFIP Networking 2020:
 
-**Measuring Decentralized Video Streaming: A Case Study of DTube**  
+**Measuring Decentralized Video Streaming: A Case Study of DTube** 
 Trinh Viet Doan, Tat Dat Pham, Markus Oberprieler, Vaibhav Bajpai  
 Technical University of Munich  
-DOI: TBD
+[Link to paper (PDF)](http://dl.ifip.org/db/conf/networking/networking2020/1570619852.pdf)
 
 For the dataset and analysis scripts of the study, visit the respective [GitHub repository](https://github.com/tv-doan/ifip-net-2020-analysis).
 
